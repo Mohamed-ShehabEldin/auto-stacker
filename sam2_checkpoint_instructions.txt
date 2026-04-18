@@ -1,0 +1,25 @@
+SAM2 checkpoint issue
+======================
+
+Your project currently expects a file named:
+
+  sam2.1_hiera_small.pt
+
+This file is required by sam2_predictor.py and must be a valid PyTorch checkpoint.
+
+Current status:
+- The file exists in the project root
+- It is 0 bytes in size
+- That causes an EOF error when torch.load tries to read it
+
+Fix:
+1. Delete the broken file:
+   rm sam2.1_hiera_small.pt
+
+2. Download a valid SAM2 checkpoint file and save it as:
+   sam2.1_hiera_small.pt
+
+3. Restart the app:
+   python3 main.py
+
+If you need a source for the checkpoint, get it from the SAM2 model repository or the location where your project originally downloaded the model.
