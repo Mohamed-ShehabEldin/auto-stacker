@@ -4,7 +4,10 @@ Quick test script for the temperature controller on COM3.
 Run this on the Windows PC with the device connected.
 """
 
-from temperature_controller.controller import ModbusTemperatureController
+try:
+    from temperature_controller.controller import ModbusTemperatureController
+except ImportError:
+    from controller import ModbusTemperatureController
 
 def test_connection(port='COM3', baudrate=9600, parity='N', stopbits=1, bytesize=8, unit=1):
     print(f"Testing {port} @ {baudrate} {parity} {stopbits} {bytesize} unit {unit}")

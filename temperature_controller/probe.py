@@ -2,7 +2,10 @@
 Probe a Modbus RTU temperature controller to discover working serial settings
 and useful candidate register addresses.
 
-Usage examples:
+IDE use:
+    Edit the SETTINGS section below, then click Run in your IDE.
+
+Terminal use:
     python3 probe.py --port COM3 --baud 9600 --unit 1
     python3 probe.py --port /dev/ttyUSB0 --baud 9600 --unit 1 --registers 258 259
 """
@@ -13,10 +16,37 @@ import sys
 
 from serial.tools import list_ports
 
-from controller import ModbusTemperatureController
+try:
+    from .controller import ModbusTemperatureController
+except ImportError:
+    from controller import ModbusTemperatureController
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
+
+# =========================
+# SETTINGS FOR IDE RUNNING
+# =========================
+#
+# Most IDEs run this file without command-line arguments. Change these values,
+# then click Run.
+#
+# Use "COM3" on your Windows machine unless Device Manager shows a different
+# port. If you set PORT = None, the script will automatically use the first
+# serial port it finds.
+PORT = "COM3"
+BAUDRATE = 9600
+PARITY = 'N'
+STOPBITS = 1
+BYTESIZE = 8
+UNIT = 1
+
+# Keep this False for a quick register test. Set True only when you want to
+# try many possible serial settings; it can take several minutes.
+SCAN_SETTINGS = False
+
+# Registers to try when SCAN_SETTINGS is False.
+REGISTERS_TO_READ = [0, 1, 2, 3, 100, 101, 258, 259, 5000, 5004, 5005]
 
 COMMON_BAUDRATES = [9600, 19200, 38400, 57600, 115200]
 COMMON_PARITIES = ['N', 'E', 'O']
@@ -28,6 +58,29 @@ COMMON_REGISTERS = [0, 1, 2, 3, 4, 5, 10, 20, 100, 101, 102, 110, 111, 112, 200,
 
 def list_serial_ports():
     return [port.device for port in list_ports.comports()]
+
+
+def choose_port(preferred_port=None):
+    if preferred_port:
+        return preferred_port
+
+    ports = list_serial_ports()
+    if not ports:
+        return None
+
+    logger.info(f"No port configured, using first detected port: {ports[0]}")
+    return ports[0]
+
+
+def print_ports():
+    ports = list_serial_ports()
+    if not ports:
+        logger.info('No serial ports found.')
+        return
+
+    logger.info('Available ports:')
+    for port in ports:
+        logger.info(f'  {port}')
 
 
 def probe_registers(port, baudrate, parity, stopbits, bytesize, unit, registers):
@@ -117,29 +170,48 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
+def run_from_ide():
+    logger.info("IDE run mode")
+    print_ports()
 
-    if args.list_ports:
-        ports = list_serial_ports()
-        if not ports:
-            logger.info('No serial ports found.')
-            return
-        logger.info('Available ports:')
-        for p in ports:
-            logger.info(f'  {p}')
+    port = choose_port(PORT)
+    if not port:
+        logger.error("No serial port found. Plug in the controller USB/RS485 adapter and run again.")
         return
 
-    if not args.port:
-        logger.error('Please specify --port or use --list-ports.')
-        sys.exit(1)
-
-    if args.scan:
-        scan_settings(args.port, args.registers)
+    if SCAN_SETTINGS:
+        scan_settings(port, REGISTERS_TO_READ)
         return
 
     probe_registers(
-        port=args.port,
+        port=port,
+        baudrate=BAUDRATE,
+        parity=PARITY,
+        stopbits=STOPBITS,
+        bytesize=BYTESIZE,
+        unit=UNIT,
+        registers=REGISTERS_TO_READ,
+    )
+
+
+def run_from_terminal():
+    args = parse_args()
+
+    if args.list_ports:
+        print_ports()
+        return
+
+    port = choose_port(args.port)
+    if not port:
+        logger.error("No serial port found. Use --list-ports after connecting the controller.")
+        return
+
+    if args.scan:
+        scan_settings(port, args.registers)
+        return
+
+    probe_registers(
+        port=port,
         baudrate=args.baud,
         parity=args.parity,
         stopbits=args.stopbits,
@@ -147,6 +219,13 @@ def main():
         unit=args.unit,
         registers=args.registers,
     )
+
+
+def main():
+    if len(sys.argv) == 1:
+        run_from_ide()
+    else:
+        run_from_terminal()
 
 
 if __name__ == '__main__':
