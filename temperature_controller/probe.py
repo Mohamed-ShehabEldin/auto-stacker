@@ -14,6 +14,7 @@ import argparse
 import logging
 import sys
 
+from serial import Serial, SerialException
 from serial.tools import list_ports
 
 try:
@@ -74,6 +75,10 @@ def list_serial_ports():
     return [port.device for port in list_ports.comports()]
 
 
+def list_serial_port_details():
+    return list(list_ports.comports())
+
+
 def choose_port(preferred_port=None):
     if preferred_port:
         return preferred_port
@@ -87,14 +92,24 @@ def choose_port(preferred_port=None):
 
 
 def print_ports():
-    ports = list_serial_ports()
+    ports = list_serial_port_details()
     if not ports:
         logger.info('No serial ports found.')
         return
 
     logger.info('Available ports:')
     for port in ports:
-        logger.info(f'  {port}')
+        logger.info(f'  {port.device}: {port.description}')
+
+
+def can_open_port(port):
+    try:
+        serial_port = Serial(port=port, timeout=0.1)
+        serial_port.close()
+        return True
+    except SerialException as exc:
+        logger.info(f"Skipping {port}: cannot open port ({exc})")
+        return False
 
 
 def probe_registers(port, baudrate, parity, stopbits, bytesize, unit, registers):
@@ -167,6 +182,10 @@ def scan_ports_for_replies(
     hits = []
     checked_settings = 0
     for port in ports:
+        if not can_open_port(port):
+            checked_settings += len(baudrates) * len(parities) * len(stopbits) * len(bytesizes) * len(units)
+            continue
+
         for baud in baudrates:
             for parity in parities:
                 for stop in stopbits:
