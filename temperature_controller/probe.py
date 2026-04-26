@@ -79,10 +79,16 @@ DISCOVERY_REGISTER_TYPES = ['holding', 'input']
 REGISTER_SCAN_RANGES = [
     (0, 120),
     (200, 320),
+    (1000, 1120),
+    (2000, 2120),
+    (4000, 4120),
     (5000, 5030),
 ]
 REGISTER_SCAN_TYPES = ['holding', 'input']
 REGISTER_WATCH_SECONDS = 5
+EXPECTED_TEMPERATURE_C = 27.0
+TEMPERATURE_TOLERANCE_C = 5.0
+TEMPERATURE_SCALINGS = [1.0, 10.0, 100.0]
 
 
 def list_serial_ports():
@@ -160,6 +166,28 @@ def read_register(controller, register_type, address):
     if register_type == 'input':
         return controller.read_input_registers(address, count=1)
     raise ValueError(f"Unknown register type: {register_type}")
+
+
+def decode_signed_16(value):
+    if value > 0x7FFF:
+        return value - 0x10000
+    return value
+
+
+def possible_temperatures(value):
+    candidates = []
+    for raw_value, signed_label in [(value, 'unsigned'), (decode_signed_16(value), 'signed')]:
+        for scaling in TEMPERATURE_SCALINGS:
+            candidates.append((raw_value / scaling, scaling, signed_label))
+    return candidates
+
+
+def looks_like_expected_temperature(value):
+    matches = []
+    for decoded, scaling, signed_label in possible_temperatures(value):
+        if abs(decoded - EXPECTED_TEMPERATURE_C) <= TEMPERATURE_TOLERANCE_C:
+            matches.append((decoded, scaling, signed_label))
+    return matches
 
 
 def scan_ports_for_replies(
@@ -305,6 +333,7 @@ def scan_register_ranges(
 
     first_snapshot = {}
     non_zero = []
+    temperature_candidates = []
 
     try:
         for register_type in register_types:
@@ -318,6 +347,8 @@ def scan_register_ranges(
                         if value != 0:
                             non_zero.append((register_type, address, value))
                             logger.info(f"  {register_type:7s} register {address:5d} = {value}")
+                        for decoded, scaling, signed_label in looks_like_expected_temperature(value):
+                            temperature_candidates.append((register_type, address, value, decoded, scaling, signed_label))
                     except Exception:
                         pass
 
@@ -328,6 +359,17 @@ def scan_register_ranges(
                 logger.info(f"  {register_type:7s} register {address:5d} = {value}")
         else:
             logger.info("No non-zero values found in these ranges.")
+
+        logger.info("")
+        if temperature_candidates:
+            logger.info(f"Possible temperature registers near {EXPECTED_TEMPERATURE_C} C:")
+            for register_type, address, value, decoded, scaling, signed_label in temperature_candidates:
+                logger.info(
+                    f"  {register_type:7s} register {address:5d} raw {value:6d} -> "
+                    f"{decoded:.2f} C ({signed_label}, /{scaling:g})"
+                )
+        else:
+            logger.info(f"No values decoded near {EXPECTED_TEMPERATURE_C} C in these ranges.")
 
         logger.info("")
         logger.info(f"Waiting {REGISTER_WATCH_SECONDS} seconds to check for changing values...")

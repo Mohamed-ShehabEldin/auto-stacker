@@ -67,6 +67,9 @@ class ModbusTemperatureController:
             raise IOError(f"Modbus error reading register {address} unit {unit}: {response}")
         return response.registers
 
+    def read_holding_register_block(self, address, count, unit=None):
+        return self.read_registers(address=address, count=count, unit=unit)
+
     def read_input_registers(self, address, count=1, unit=None):
         if not self.connected:
             self.connect()
@@ -77,6 +80,9 @@ class ModbusTemperatureController:
         if hasattr(response, 'isError') and response.isError():
             raise IOError(f"Modbus error reading input register {address} unit {unit}: {response}")
         return response.registers
+
+    def read_input_register_block(self, address, count, unit=None):
+        return self.read_input_registers(address=address, count=count, unit=unit)
 
     def write_register(self, address, value, unit=None):
         if not self.connected:
