@@ -13,6 +13,7 @@ Terminal use:
 import argparse
 import logging
 import sys
+import time
 
 from serial import Serial, SerialException
 from serial.tools import list_ports
@@ -32,19 +33,24 @@ logger = logging.getLogger(__name__)
 # Most IDEs run this file without command-line arguments. Change these values,
 # then click Run.
 #
-# Use "COM3" if you know the exact port. Leave PORT = None to test every
-# detected COM port from the IDE.
-PORT = None
+# Known working settings from the discovery scan:
+#   COM4 @ 9600 N 1 8 unit 10
+#
+# If Windows assigns a different COM number later, change PORT here.
+PORT = "COM4"
 BAUDRATE = 9600
 PARITY = 'N'
 STOPBITS = 1
 BYTESIZE = 8
-UNIT = 1
+UNIT = 10
 TIMEOUT = 0.5
 
-# IDE_SCAN_ALL_PORTS is the best first test when you see "No response" errors.
-# It tries a small set of common settings across all detected COM ports.
-IDE_SCAN_ALL_PORTS = True
+# Use this if you need to rediscover the port/settings.
+IDE_SCAN_ALL_PORTS = False
+
+# Normal IDE run mode after the port is known. This scans likely ranges and
+# reports non-zero or changing values.
+IDE_FIND_REGISTERS = True
 
 # Keep this False for a focused scan. Set True only when you want to try many
 # possible serial settings; it can take several minutes.
@@ -69,6 +75,14 @@ DISCOVERY_BYTESIZES = [8]
 DISCOVERY_UNITS = [1, 2, 10, 247]
 DISCOVERY_REGISTERS = [0, 1, 2, 100, 101, 258, 259, 5000]
 DISCOVERY_REGISTER_TYPES = ['holding', 'input']
+
+REGISTER_SCAN_RANGES = [
+    (0, 120),
+    (200, 320),
+    (5000, 5030),
+]
+REGISTER_SCAN_TYPES = ['holding', 'input']
+REGISTER_WATCH_SECONDS = 5
 
 
 def list_serial_ports():
@@ -255,6 +269,94 @@ def scan_ports_for_replies(
     return hits
 
 
+def scan_register_ranges(
+    port,
+    baudrate,
+    parity,
+    stopbits,
+    bytesize,
+    unit,
+    ranges=None,
+    register_types=None,
+):
+    ranges = ranges or REGISTER_SCAN_RANGES
+    register_types = register_types or REGISTER_SCAN_TYPES
+
+    logger.info("")
+    logger.info(f"Register scan on {port} @ {baudrate} {parity} {stopbits} {bytesize} unit {unit}")
+    logger.info(f"Ranges: {ranges}")
+    logger.info("Looking for non-zero values and values that change over a few seconds.")
+
+    controller = ModbusTemperatureController(
+        port=port,
+        baudrate=baudrate,
+        parity=parity,
+        stopbits=stopbits,
+        bytesize=bytesize,
+        unit=unit,
+        timeout=TIMEOUT,
+    )
+
+    try:
+        controller.connect()
+    except Exception as exc:
+        logger.error(f"Connection failed: {exc}")
+        return []
+
+    first_snapshot = {}
+    non_zero = []
+
+    try:
+        for register_type in register_types:
+            for start, end in ranges:
+                logger.info(f"Scanning {register_type} registers {start} to {end}...")
+                for address in range(start, end + 1):
+                    try:
+                        values = read_register(controller, register_type, address)
+                        value = values[0]
+                        first_snapshot[(register_type, address)] = value
+                        if value != 0:
+                            non_zero.append((register_type, address, value))
+                            logger.info(f"  {register_type:7s} register {address:5d} = {value}")
+                    except Exception:
+                        pass
+
+        logger.info("")
+        if non_zero:
+            logger.info("Non-zero register values:")
+            for register_type, address, value in non_zero:
+                logger.info(f"  {register_type:7s} register {address:5d} = {value}")
+        else:
+            logger.info("No non-zero values found in these ranges.")
+
+        logger.info("")
+        logger.info(f"Waiting {REGISTER_WATCH_SECONDS} seconds to check for changing values...")
+        time.sleep(REGISTER_WATCH_SECONDS)
+
+        changed = []
+        for (register_type, address), old_value in first_snapshot.items():
+            try:
+                new_value = read_register(controller, register_type, address)[0]
+            except Exception:
+                continue
+            if new_value != old_value:
+                changed.append((register_type, address, old_value, new_value))
+
+        if changed:
+            logger.info("Changing values:")
+            for register_type, address, old_value, new_value in changed:
+                logger.info(f"  {register_type:7s} register {address:5d}: {old_value} -> {new_value}")
+        else:
+            logger.info("No changing values found during the short watch.")
+
+        logger.info("")
+        logger.info("Tip: current temperature is often stored as temp x10.")
+        logger.info("For example, register value 237 can mean 23.7 C.")
+        return non_zero
+    finally:
+        controller.close()
+
+
 def scan_settings(port, registers, baudrates=None, parities=None, stopbits=None, bytesizes=None, units=None):
     baudrates = baudrates or COMMON_BAUDRATES
     parities = parities or COMMON_PARITIES
@@ -330,6 +432,17 @@ def run_from_ide():
 
     if SCAN_SETTINGS:
         scan_settings(port, REGISTERS_TO_READ)
+        return
+
+    if IDE_FIND_REGISTERS:
+        scan_register_ranges(
+            port=port,
+            baudrate=BAUDRATE,
+            parity=PARITY,
+            stopbits=STOPBITS,
+            bytesize=BYTESIZE,
+            unit=UNIT,
+        )
         return
 
     probe_registers(

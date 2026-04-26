@@ -89,6 +89,28 @@ class ModbusTemperatureController:
             raise IOError(f"Modbus error writing register {address} unit {unit}: {response}")
         return response
 
+    def read_coils(self, address, count=1, unit=None):
+        if not self.connected:
+            self.connect()
+        unit = self.unit if unit is None else unit
+        response = self.client.read_coils(address=address, count=count, unit=unit)
+        if response is None:
+            raise IOError(f"Timeout or no response for coil {address} unit {unit}")
+        if hasattr(response, 'isError') and response.isError():
+            raise IOError(f"Modbus error reading coil {address} unit {unit}: {response}")
+        return response.bits[:count]
+
+    def read_discrete_inputs(self, address, count=1, unit=None):
+        if not self.connected:
+            self.connect()
+        unit = self.unit if unit is None else unit
+        response = self.client.read_discrete_inputs(address=address, count=count, unit=unit)
+        if response is None:
+            raise IOError(f"Timeout or no response for discrete input {address} unit {unit}")
+        if hasattr(response, 'isError') and response.isError():
+            raise IOError(f"Modbus error reading discrete input {address} unit {unit}: {response}")
+        return response.bits[:count]
+
     def read_temperature(self, address, scaling=10.0, signed=True, unit=None):
         registers = self.read_registers(address, count=1, unit=unit)
         value = registers[0]
